@@ -5,11 +5,11 @@
 
 data "aws_ami" "netskope_gw_image_id" {
   most_recent = true
-  owners      = [var.aws_instance["ami_owner"]]
+  owners      = [var.aws_instance.ami_owner]
 
   filter {
     name   = "name"
-    values = [join("", [var.aws_instance["ami_name"], "*"])]
+    values = [join("", [var.aws_instance.ami_name, "*"])]
   }
 }
 

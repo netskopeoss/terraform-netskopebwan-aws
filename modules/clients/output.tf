@@ -2,9 +2,10 @@
 #  Copyright (c) 2022 Infiot Inc.
 #  All rights reserved.
 #------------------------------------------------------------------------------
-output "transit_gateway_ip" {
+
+output "client_instance" {
   value = {
-    tgw_primary_ip   = local.tgw_primary_ip
-    tgw_secondary_ip = local.tgw_secondary_ip
+    id = aws_instance.client_instance.id
+    ip = try(var.netskope_gateway_config.gateway_data.primary.elastic_ips[keys(var.netskope_gateway_config.gateway_data.primary.elastic_ips)[0]].public_ip, "")
   }
 }
