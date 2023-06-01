@@ -4,7 +4,7 @@
 #------------------------------------------------------------------------------
 
 data "aws_vpc" "netskope_sdwan_gw_vpc" {
-  count = var.aws_network_config.create_vpc == false ? 1 : 0
+  count = var.aws_network_config.vpc_id != "" ? 1 : 0
   id    = var.aws_network_config.vpc_id
 }
 
@@ -21,7 +21,7 @@ locals {
 }
 
 data "aws_internet_gateway" "netskope_sdwan_gw_igw" {
-  count = var.aws_network_config.create_vpc == false ? 1 : 0
+  count = var.aws_network_config.vpc_id != "" ? 1 : 0
   filter {
     name   = "attachment.vpc-id"
     values = [local.netskope_sdwan_gw_vpc]
@@ -41,7 +41,7 @@ locals {
 }
 
 data "aws_subnets" "all_subnets" {
-  count = var.aws_network_config.create_vpc == false ? 1 : 0
+  count = var.aws_network_config.vpc_id != "" ? 1 : 0
   filter {
     name   = "vpc-id"
     values = [local.netskope_sdwan_gw_vpc]
@@ -53,82 +53,82 @@ locals {
 }
 
 data "aws_subnet" "all_subnet_cidr" {
-  count = var.aws_network_config.create_vpc == false ? length(local.all_subnet_ids["subnets"]) : 0
+  count = var.aws_network_config.vpc_id != "" ? length(local.all_subnet_ids["subnets"]) : 0
   id    = local.all_subnet_ids["subnets"][count.index]
 }
 
 locals {
-  primary_gw_cidr_index = {
-    for intf, subnet in local.primary_gw_enabled_interfaces :
-    intf => try(index([for s in data.aws_subnet.all_subnet_cidr : s.cidr_block], local.primary_gw_enabled_interfaces[intf].subnet_cidr), -1)
+  primary_zone_cidr_index = {
+    for intf, subnet in local.primary_zone_enabled_interfaces :
+    intf => try(index([for s in data.aws_subnet.all_subnet_cidr : s.cidr_block], local.primary_zone_enabled_interfaces[intf].subnet_cidr), -1)
   }
-  primary_gw_subnet_tag = {
-    for intf, subnet in local.primary_gw_enabled_interfaces :
-    intf => local.primary_gw_cidr_index[intf] >= 0 ? try(data.aws_subnet.all_subnet_cidr[local.primary_gw_cidr_index[intf]].tags["Environment"], "TAG_NOT_EXISTS") : "SUBNET_NOT_FOUND"
+  primary_zone_subnet_tag = {
+    for intf, subnet in local.primary_zone_enabled_interfaces :
+    intf => local.primary_zone_cidr_index[intf] >= 0 ? try(data.aws_subnet.all_subnet_cidr[local.primary_zone_cidr_index[intf]].tags["Environment"], "TAG_NOT_EXISTS") : "SUBNET_NOT_FOUND"
   }
-  secondary_gw_cidr_index = {
-    for intf, subnet in local.secondary_gw_enabled_interfaces :
-    intf => try(index([for s in data.aws_subnet.all_subnet_cidr : s.cidr_block], local.secondary_gw_enabled_interfaces[intf].subnet_cidr), -1)
+  secondary_zone_cidr_index = {
+    for intf, subnet in local.secondary_zone_enabled_interfaces :
+    intf => try(index([for s in data.aws_subnet.all_subnet_cidr : s.cidr_block], local.secondary_zone_enabled_interfaces[intf].subnet_cidr), -1)
   }
-  secondary_gw_subnet_tag = {
-    for intf, subnet in local.secondary_gw_enabled_interfaces :
-    intf => local.secondary_gw_cidr_index[intf] >= 0 ? try(data.aws_subnet.all_subnet_cidr[local.secondary_gw_cidr_index[intf]].tags["Environment"], "TAG_NOT_EXISTS") : "SUBNET_NOT_FOUND"
+  secondary_zone_subnet_tag = {
+    for intf, subnet in local.secondary_zone_enabled_interfaces :
+    intf => local.secondary_zone_cidr_index[intf] >= 0 ? try(data.aws_subnet.all_subnet_cidr[local.secondary_zone_cidr_index[intf]].tags["Environment"], "TAG_NOT_EXISTS") : "SUBNET_NOT_FOUND"
   }
 }
 
-data "aws_subnet" "netskope_sdwan_primary_gw_subnets" {
+data "aws_subnet" "netskope_sdwan_primary_zone_subnets" {
   for_each = {
-    for intf, subnet in local.primary_gw_enabled_interfaces : intf => subnet if local.primary_gw_cidr_index[intf] >= 0
+    for intf, subnet in local.primary_zone_enabled_interfaces : intf => subnet if local.primary_zone_cidr_index[intf] >= 0
   }
   vpc_id     = local.netskope_sdwan_gw_vpc
   cidr_block = each.value.subnet_cidr
 }
 
-data "aws_subnet" "netskope_sdwan_secondary_gw_subnets" {
+data "aws_subnet" "netskope_sdwan_secondary_zone_subnets" {
   for_each = {
-    for intf, subnet in local.secondary_gw_enabled_interfaces : intf => subnet if(var.netskope_gateway_config.ha_enabled && local.secondary_gw_cidr_index[intf] >= 0)
+    for intf, subnet in local.secondary_zone_enabled_interfaces : intf => subnet if(local.secondary_zone_cidr_index[intf] >= 0)
   }
   vpc_id     = local.netskope_sdwan_gw_vpc
   cidr_block = each.value.subnet_cidr
 }
 
-resource "aws_subnet" "netskope_sdwan_primary_gw_subnets" {
+resource "aws_subnet" "netskope_sdwan_primary_zone_subnets" {
   for_each = {
-    for intf, subnet in local.primary_gw_enabled_interfaces : intf => subnet
-    if(local.primary_gw_cidr_index[intf] == -1 || try(regex(var.netskope_tenant.tenant_id, local.primary_gw_subnet_tag[intf]), "") != "" || local.primary_gw_subnet_tag[intf] == "SUBNET_NOT_FOUND")
+    for intf, subnet in local.primary_zone_enabled_interfaces : intf => subnet
+    if(local.primary_zone_cidr_index[intf] == -1 || try(regex(var.netskope_tenant.tenant_id, local.primary_zone_subnet_tag[intf]), "") != "" || local.primary_zone_subnet_tag[intf] == "SUBNET_NOT_FOUND")
   }
   vpc_id            = local.netskope_sdwan_gw_vpc
-  cidr_block        = each.value.subnet_cidr
+  cidr_block        = each.value
   availability_zone = local.primary_zone
 
   tags = {
-    Environment = join("-", ["Primary", each.key, var.netskope_tenant.tenant_id])
+    Environment = join("-", [each.key, local.primary_zone, var.netskope_tenant.tenant_id])
   }
 }
 
-resource "aws_subnet" "netskope_sdwan_secondary_gw_subnets" {
+resource "aws_subnet" "netskope_sdwan_secondary_zone_subnets" {
   for_each = {
-    for intf, subnet in local.secondary_gw_enabled_interfaces : intf => subnet
-    if(var.netskope_gateway_config.ha_enabled && (local.secondary_gw_cidr_index[intf] == -1 || try(regex(var.netskope_tenant.tenant_id, local.secondary_gw_subnet_tag[intf]), "") != "" || local.secondary_gw_subnet_tag[intf] == "SUBNET_NOT_FOUND"))
+    for intf, subnet in local.secondary_zone_enabled_interfaces : intf => subnet
+    if(local.secondary_zone_cidr_index[intf] == -1 || try(regex(var.netskope_tenant.tenant_id, local.secondary_zone_subnet_tag[intf]), "") != "" || local.secondary_zone_subnet_tag[intf] == "SUBNET_NOT_FOUND")
   }
   vpc_id            = local.netskope_sdwan_gw_vpc
-  cidr_block        = each.value.subnet_cidr
+  cidr_block        = each.value
   availability_zone = local.secondary_zone
 
   tags = {
-    Environment = join("-", ["Secondary", each.key, var.netskope_tenant.tenant_id])
+    Environment = join("-", [each.key, local.secondary_zone, var.netskope_tenant.tenant_id])
   }
 }
 
 locals {
-  primary_gw_subnets = {
-    for intf, subnet in local.primary_gw_enabled_interfaces :
-    intf => element(coalescelist(try([data.aws_subnet.netskope_sdwan_primary_gw_subnets[intf].id], []), try([aws_subnet.netskope_sdwan_primary_gw_subnets[intf].id], []), [""]), 0)
+  primary_zone_subnets = {
+    for intf, subnet in local.primary_zone_enabled_interfaces :
+    intf => element(coalescelist(try([data.aws_subnet.netskope_sdwan_primary_zone_subnets[intf].id], []), try([aws_subnet.netskope_sdwan_primary_zone_subnets[intf].id], []), [""]), 0)
     if subnet != null
   }
-  secondary_gw_subnets = {
-    for intf, subnet in local.secondary_gw_enabled_interfaces :
-    intf => element(coalescelist(try([data.aws_subnet.netskope_sdwan_secondary_gw_subnets[intf].id], []), try([aws_subnet.netskope_sdwan_secondary_gw_subnets[intf].id], [""]), [""]), 0)
+  secondary_zone_subnets = {
+    for intf, subnet in local.secondary_zone_enabled_interfaces :
+    intf => element(coalescelist(try([data.aws_subnet.netskope_sdwan_secondary_zone_subnets[intf].id], []), try([aws_subnet.netskope_sdwan_secondary_zone_subnets[intf].id], [""]), [""]), 0)
     if subnet != null
   }
 }
@@ -161,27 +161,27 @@ locals {
   netskope_sdwan_private_rt = var.aws_network_config.route_table.private != "" ? var.aws_network_config.route_table.private : try(element(aws_route_table.netskope_sdwan_gw_private_rt.*.id, 0), "")
 }
 
-resource "aws_route_table_association" "netskope_sdwan_primary_gw_public_rt" {
-  for_each       = toset(keys(local.primary_public_overlay_interfaces))
-  subnet_id      = local.primary_gw_subnets[each.key]
+resource "aws_route_table_association" "netskope_sdwan_primary_zone_public_rt" {
+  for_each       = toset(keys(local.public_overlay_interfaces))
+  subnet_id      = local.primary_zone_subnets[each.key]
   route_table_id = local.netskope_sdwan_public_rt
 }
 
-resource "aws_route_table_association" "netskope_sdwan_primary_gw_private_rt" {
-  for_each       = toset(local.primary_lan_interfaces)
-  subnet_id      = local.primary_gw_subnets[each.key]
+resource "aws_route_table_association" "netskope_sdwan_primary_zone_private_rt" {
+  for_each       = toset(local.lan_interfaces)
+  subnet_id      = local.primary_zone_subnets[each.key]
   route_table_id = local.netskope_sdwan_private_rt
 }
 
-resource "aws_route_table_association" "netskope_sdwan_secondary_gw_public_rt" {
-  for_each       = var.netskope_gateway_config.ha_enabled ? toset(keys(local.secondary_public_overlay_interfaces)) : []
-  subnet_id      = local.secondary_gw_subnets[each.key]
+resource "aws_route_table_association" "netskope_sdwan_secondary_zone_public_rt" {
+  for_each       = toset(keys(local.public_overlay_interfaces))
+  subnet_id      = local.secondary_zone_subnets[each.key]
   route_table_id = local.netskope_sdwan_public_rt
 }
 
-resource "aws_route_table_association" "netskope_sdwan_secondary_gw_private_rt" {
-  for_each       = var.netskope_gateway_config.ha_enabled ? toset(local.secondary_lan_interfaces) : []
-  subnet_id      = local.secondary_gw_subnets[each.key]
+resource "aws_route_table_association" "netskope_sdwan_secondary_zone_private_rt" {
+  for_each       = toset(local.lan_interfaces)
+  subnet_id      = local.secondary_zone_subnets[each.key]
   route_table_id = local.netskope_sdwan_private_rt
 }
 
@@ -189,6 +189,16 @@ resource "aws_security_group" "netskope_sdwan_gw_public_sg" {
   name   = join("-", ["Public-SG", var.netskope_tenant.tenant_id])
   vpc_id = local.netskope_sdwan_gw_vpc
 
+dynamic "ingress" {
+    for_each = var.clients.create_clients ? toset(var.clients.ports) : toset([])
+    content {
+      description = "SSH"
+      from_port   = sum([2000, tonumber(ingress.key)])
+      to_port     = sum([2000, tonumber(ingress.key)])
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
   ingress {
     description = "SSH"
     from_port   = 22
@@ -215,16 +225,6 @@ resource "aws_security_group" "netskope_sdwan_gw_public_sg" {
   tags = {
     Name = join("-", ["Public-SG", var.netskope_tenant.tenant_id])
   }
-}
-
-resource "aws_security_group_rule" "clients" {
-  for_each          = var.clients.create_clients ? toset(var.clients.ports) : toset([])
-  type              = "ingress"
-  from_port         = sum([2000, tonumber(each.key)])
-  to_port           = sum([2000, tonumber(each.key)])
-  protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.netskope_sdwan_gw_public_sg.id
 }
 
 resource "aws_security_group" "netskope_sdwan_gw_private_sg" {
@@ -312,13 +312,13 @@ data "aws_ec2_transit_gateway_vpc_attachment" "netskope_sdwan_tgw_attach" {
 }
 
 locals {
-  netskope_sdwan_primary_private_subnet   = length(local.primary_lan_interfaces) > 0 ? local.primary_gw_subnets[element(tolist(local.primary_lan_interfaces), 0)] : ""
-  netskope_sdwan_secondary_private_subnet = length(local.secondary_lan_interfaces) > 0 ? local.secondary_gw_subnets[element(tolist(local.secondary_lan_interfaces), 0)] : ""
+  netskope_sdwan_primary_private_subnet   = length(local.lan_interfaces) > 0 ? local.primary_zone_subnets[element(tolist(local.lan_interfaces), 0)] : ""
+  netskope_sdwan_secondary_private_subnet = length(local.lan_interfaces) > 0 ? local.secondary_zone_subnets[element(tolist(local.lan_interfaces), 0)] : ""
   private_subnets_to_attach               = concat([local.netskope_sdwan_primary_private_subnet], local.netskope_sdwan_secondary_private_subnet != "" ? [local.netskope_sdwan_secondary_private_subnet] : [])
 }
 
 resource "aws_ec2_transit_gateway_vpc_attachment" "netskope_sdwan_tgw_attach" {
-  count              = (var.aws_network_config.create_vpc || var.aws_transit_gw.vpc_attachment == "") && length(local.primary_lan_interfaces) > 0 ? 1 : 0
+  count              = (var.aws_network_config.create_vpc || var.aws_transit_gw.vpc_attachment == "") && length(local.lan_interfaces) > 0 ? 1 : 0
   subnet_ids         = local.private_subnets_to_attach
   transit_gateway_id = local.aws_transit_gateway.id
   vpc_id             = local.netskope_sdwan_gw_vpc
@@ -333,14 +333,14 @@ locals {
 }
 
 resource "aws_route" "netskope_sdwan_gw_tgw_route_entry" {
-  count                  = length(local.primary_lan_interfaces) > 0 ? 1 : 0
+  count                  = length(local.lan_interfaces) > 0 ? 1 : 0
   route_table_id         = local.netskope_sdwan_private_rt
   destination_cidr_block = tolist(local.aws_transit_gateway.transit_gateway_cidr_blocks)[0]
   transit_gateway_id     = local.aws_transit_gateway.id
 }
 
 resource "aws_ec2_transit_gateway_connect" "netskope_sdwan_tgw_connect" {
-  count                   = length(local.primary_lan_interfaces) > 0 ? 1 : 0
+  count                   = length(local.lan_interfaces) > 0 ? ceil(var.netskope_gateway_config.gateway_count / 4) : 0
   transport_attachment_id = local.aws_transit_gateway_attachment
   transit_gateway_id      = local.aws_transit_gateway.id
 
