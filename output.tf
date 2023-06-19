@@ -2,6 +2,7 @@
 #  Copyright (c) 2022 Infiot Inc.
 #  All rights reserved.
 #------------------------------------------------------------------------------
+
 locals {
   client-login = <<EOF
 
@@ -22,15 +23,12 @@ locals {
   EOF
 }
 
-
-output "primary-gw-gre-config" {
-  value = module.aws_vpc.primary-gw-gre-config
-}
-
-output "secondary-gw-gre-config" {
-  value = module.aws_vpc.secondary-gw-gre-config
-}
-
 output "client-details" {
   value = var.clients.create_clients ? local.client-login : null
+}
+
+
+
+output "netskope-gw-gre-config" {
+  value = module.aws_vpc.netskope-gw-gre-config
 }
