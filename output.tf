@@ -2,35 +2,27 @@
 #  Copyright (c) 2022 Infiot Inc.
 #  All rights reserved.
 #------------------------------------------------------------------------------
-locals {
-  client-login = <<EOF
 
-  ###########################################################################################
-  ##  Since you have opt'ed to deploy a demo client, here are the login details of client  ##
-  ##  to experience end to end testing
-  ###########################################################################################
-
-  To access the client, Primary GW has already been setup with required Port-forwarding configurations.
-
-  Login Details :
-  ---------------
-
-         Public IP : ${try(module.clients[0].client_instance.ip, "")}
-         Username  : ubuntu
-         Password  : ${var.clients.password}
-
-  EOF
+output "gateways" {
+  description = "Deployed gateway instances and their GRE configuration status"
+  value = {
+    for gw_key, gw in local.gateways : gw_key => {
+      instance_id    = aws_instance.gateways[gw_key].id
+      gre_configured = try(null_resource.gre_config[gw_key].id != null, false)
+    }
+  }
 }
 
-
-output "primary-gw-gre-config" {
-  value = module.aws_vpc.primary-gw-gre-config
+output "gre-config-ssm-document" {
+  description = "SSM document name used for GRE tunnel configuration"
+  value       = aws_ssm_document.gre_config.name
 }
 
-output "secondary-gw-gre-config" {
-  value = module.aws_vpc.secondary-gw-gre-config
+output "computed-gateway-map" {
+  description = "Auto-computed gateway configuration from gateway_count and az_count"
+  value       = local.gateways
 }
 
 output "client-details" {
-  value = var.clients.create_clients ? local.client-login : null
+  value = var.clients.create_clients ? "Client deployed at ${try(aws_instance.client_instance[0].private_ip, "unknown")}" : null
 }
